@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>kibsim v4.4.0</title>
+<title>kibsim v4.5.0</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
     body { font-family:-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; padding:10px; max-width: 600px; margin: auto; background: #f0f2f5; color: #333; line-height: 1.5; }
@@ -318,7 +318,6 @@ function renderGrid() {
     }
 }
 
-// Logic to calculate picks without buying
 function getPicks(m_s1, m_s2, m_s3, m_type, m_mode) {
     let picks = [];
     if(m_mode==="normal") {
@@ -391,6 +390,9 @@ function buy() {
     render();
 }
 
+// ------------------------------------------------------------------
+// 変更箇所：判定ロジックを強化し、当たった「買い目」ごとにオッズを聞くように修正
+// ------------------------------------------------------------------
 function judge() {
     const race = norm($("resRace").value);
     const r=[$("r1").value,$("r2").value,$("r3").value].map(Number);
@@ -402,29 +404,36 @@ function judge() {
     
     tgts.forEach(t => {
         const res = t.type.includes("枠") ? w : r; 
-        const resStr = res.slice(0, t.type.includes("三連")?3:2).join('-');
-        
-        let hCnt = 0;
+        let totalPay = 0;
+        let isAnyHit = false;
+
+        // 1点ごとに的中判定を行い、当たったものだけ個別にオッズを聞く
         t.picks.forEach(p => {
             let win=false;
             if(t.type==="単勝") win=(p[0]==res[0]);
             else if(t.type==="複勝") win=res.slice(0,3).includes(p[0]);
             else if(t.type==="ワイド") win=(p.filter(x=>res.slice(0,3).includes(x)).length===2);
-            else if(["馬連","枠連"].includes(t.type)) win=(p.join()==[res[0],res[1]].sort((a,b)=>a-b).join());
+            else if(["馬連","枠連"].includes(t.type)) win=(p.slice().sort((a,b)=>a-b).join()==[res[0],res[1]].sort((a,b)=>a-b).join());
             else if(["馬単","枠単"].includes(t.type)) win=(p[0]==res[0] && p[1]==res[1]);
-            else if(t.type==="三連複") win=(p.join()==[res[0],res[1],res[2]].sort((a,b)=>a-b).join());
+            else if(t.type==="三連複") win=(p.slice().sort((a,b)=>a-b).join()==[res[0],res[1],res[2]].sort((a,b)=>a-b).join());
             else if(t.type==="三連単") win=(p[0]==res[0] && p[1]==res[1] && p[2]==res[2]);
-            if(win) hCnt++;
+
+            if(win) {
+                isAnyHit = true;
+                const msg = `【的中！】${t.race}\n券種: ${t.type} (${t.mode})\n\n🎯 的中した買い目: [${p.join('-')}]\n\nこの買い目の配当(100円あたり)を入力:`;
+                const odds = prompt(msg, "0");
+                if(odds && Number(odds)>0) {
+                    totalPay += Math.floor((Number(odds)/100) * t.unit);
+                }
+            }
         });
         
-        if(hCnt>0) {
-            const msg = `【的中】${t.race}\n券種: ${t.type} (${t.mode})\n確定結果: ${resStr}\n\n100円あたりの配当を入力:`;
-            const odds = prompt(msg, "0");
-            if(odds && Number(odds)>0) { 
-                t.pay = Math.floor((Number(odds)/100) * t.unit * hCnt); 
-                t.stat = "win"; 
-            }
-        } else { t.stat = "lose"; }
+        if(isAnyHit) {
+            t.pay = totalPay;
+            t.stat = (totalPay > 0) ? "win" : "lose"; // 配当0入力なら外れ扱い
+        } else {
+            t.stat = "lose";
+        }
     });
     render();
 }
@@ -522,10 +531,8 @@ function card(t, del) {
     </div>`;
 }
 
-// 変更箇所：日付と時間を入れたファイル名でダウンロード
 function exportData(){
     const d = new Date();
-    // YYYYMMDD_HHMM形式を作成
     const str = d.getFullYear() + 
                 String(d.getMonth() + 1).padStart(2, '0') + 
                 String(d.getDate()).padStart(2, '0') + "_" +
@@ -533,7 +540,6 @@ function exportData(){
                 String(d.getMinutes()).padStart(2, '0');
     
     const filename = `kibsim_${str}.json`;
-    
     const blob = new Blob([JSON.stringify({tickets,deposits})],{type:'application/json'});
     const a=document.createElement('a'); 
     a.href=URL.createObjectURL(blob); 
